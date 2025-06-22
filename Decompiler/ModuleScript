@@ -3,13 +3,23 @@ local decompJSON = {}
 local output = [=[]=]
 
 function decompJSON:convert(config)
-    local function fromat(tbl, indent)
+    local HttpService = game:GetService("HttpService")
+
+    local function fromat(tbl, indent, visited)
         indent = indent or 0
+        visited = visited or {}
+
+        if visited[tbl] then
+            output = output .. "\n" .. string.rep("\t", indent) .. "-- cyclic reference skipped"
+            return
+        end
+        visited[tbl] = true
+
         for key, value in pairs(tbl) do
             local formatting = string.rep("\t", indent) .. "\n  [\"" .. tostring(key) .. "\"]"
             if type(value) == "table" then
                 output = output .. formatting .. " = {"
-                fromat(value, indent + 1)
+                fromat(value, indent + 1, visited)
                 output = output .. string.rep("\t", indent) .. "\n};"
             else
                 output = output .. formatting .. " = " .. tostring(value) .. ";"
@@ -18,27 +28,39 @@ function decompJSON:convert(config)
     end
 
     local function convert(jsonString)
-        local tableData = game:GetService("HttpService"):JSONDecode(jsonString)
-        if tableData then
+        local success, tableData = pcall(function()
+            return HttpService:JSONDecode(jsonString)
+        end)
+
+        if success and tableData then
             output = "local module = {"
             fromat(tableData, 1)
             output = output .. "\n};"
+
             return {
                 copy = function()
-                    setclipboard(output)
+                    if typeof(setclipboard) == "function" then
+                        pcall(function()
+                            setclipboard(output)
+                        end)
+                    end
                 end;
                 log = function()
                     print(output)
                 end
             }
         else
+            warn("Failed to decode JSON.")
             return nil
         end
     end
-    if config.action == "copy" then
+
+    if config and config.action == "copy" then
         convert(config.JSON):copy()
-    else
+    elseif config and config.action == "log" then
         convert(config.JSON):log()
+    else
+        warn("Invalid config passed to decompJSON:convert()")
     end
 end
 
